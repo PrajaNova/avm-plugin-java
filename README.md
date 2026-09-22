@@ -26,7 +26,7 @@ building/publishing this repo itself.
 - **Automatic `JAVA_HOME`** — computed directly from the selected version,
   in-process, every time you run a command — no stale/incorrectly-cached
   value possible (see the main repo's
-  [`docs/migration/PLUGIN_PROTOCOL.md`](https://github.com/PrajaNova/avm/blob/main/docs/migration/PLUGIN_PROTOCOL.md)
+  [`docs/plugins/CREATING_A_PLUGIN.md`](https://github.com/PrajaNova/avm/blob/main/docs/plugins/CREATING_A_PLUGIN.md)
   for why that mattered enough to be the reason this provider exists).
 
 ## Commands
@@ -67,7 +67,7 @@ plugin add java` downloads. See
 [`avm-marketplace`](https://github.com/PrajaNova/avm-marketplace) for the
 registry entry that points at this repo, and the main
 [avm repo](https://github.com/PrajaNova/avm)'s
-`docs/migration/PLUGIN_PROTOCOL.md` for the full wire protocol this
+`docs/plugins/CREATING_A_PLUGIN.md` for the full wire protocol this
 executable speaks (`manifest`, `versions`, `is-installed`,
 `installed-versions`, `executable-path`, `env-vars`, `install`,
 `uninstall`).
