@@ -16,7 +16,10 @@ pub fn available_versions(query: ToolVersionQuery) -> Result<Vec<ToolVersion>> {
     let releases = package_index()?;
 
     let filtered: Vec<&Package> = match query {
-        ToolVersionQuery::Recent => releases.iter().take(10).collect(),
+        // The interactive picker (avm-cli) pages 10 at a time with real
+        // up/down scrolling — capping the source list at exactly one page
+        // left nothing to scroll into. 30 gives ~3 pages of real releases.
+        ToolVersionQuery::Recent => releases.iter().take(30).collect(),
         ToolVersionQuery::Latest => releases.iter().take(1).collect(),
         ToolVersionQuery::Major(major) => releases
             .iter()
