@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use avm_plugin_api::{ToolVersion, ToolVersionQuery};
 use serde::Deserialize;
-use std::process::Command;
 
 /// The foojay Disco API (https://api.foojay.io) aggregates JDK builds across
 /// vendors in one place; `temurin` is Eclipse Adoptium's build of OpenJDK —
@@ -13,25 +12,12 @@ const DISCO_BASE_URL: &str = "https://api.foojay.io/disco/v3.0";
 const DISTRIBUTION: &str = "temurin";
 
 pub fn available_versions(query: ToolVersionQuery) -> Result<Vec<ToolVersion>> {
-    let releases = package_index()?;
-
-    let filtered: Vec<&Package> = match query {
-        // No cap: the interactive picker (avm-cli) has real scrolling and
-        // type-to-search, so there's no need to pre-trim the list — let
-        // the user search/scroll the actual full release history.
-        ToolVersionQuery::Recent => releases.iter().collect(),
-        ToolVersionQuery::Latest => releases.iter().take(1).collect(),
-        ToolVersionQuery::Major(major) => releases
-            .iter()
-            .filter(|pkg| pkg.major_version == major)
-            .collect(),
-    };
-
-    Ok(filtered
+    let releases = query.filter(package_index()?, |pkg| pkg.major_version);
+    Ok(releases
         .into_iter()
         .map(|pkg| ToolVersion {
             version: avm_version(&pkg.java_version),
-            label: pkg.java_version.clone(),
+            label: pkg.java_version,
             channel: Some(pkg.term_of_support.clone()),
             is_lts: pkg.term_of_support == "lts",
             is_security: false,
@@ -42,7 +28,7 @@ pub fn available_versions(query: ToolVersionQuery) -> Result<Vec<ToolVersion>> {
 /// avm's on-disk version string. Prefixed so `~/.avm/tools/java/<version>`
 /// stays self-describing and matches the naming an existing asdf-java
 /// install already used (`openjdk-17.0.2`) — no forced reinstall on cutover.
-pub fn avm_version(java_version: &str) -> String {
+fn avm_version(java_version: &str) -> String {
     format!("openjdk-{java_version}")
 }
 
@@ -63,11 +49,11 @@ pub fn find_package(java_version: &str) -> Result<Package> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Package {
-    pub java_version: String,
-    pub distribution_version: String,
-    pub major_version: u64,
+    java_version: String,
+    distribution_version: String,
+    major_version: u64,
     #[serde(default)]
-    pub term_of_support: String,
+    term_of_support: String,
     pub links: PackageLinks,
 }
 
@@ -88,25 +74,9 @@ fn package_index() -> Result<Vec<Package>> {
         host_arch_param()?,
     );
 
-    let output = Command::new("curl")
-        .arg("-fsSL")
-        .arg("--connect-timeout")
-        .arg("10")
-        .arg("--max-time")
-        .arg("20")
-        .arg(&url)
-        .output()
-        .with_context(|| format!("failed to fetch OpenJDK version index from {url}"))?;
-
-    if !output.status.success() {
-        return Err(anyhow!(
-            "failed to fetch OpenJDK version index from {url}: curl exited with {}",
-            output.status
-        ));
-    }
-
+    let raw = avm_plugin_api::fetch(&url, 20)?;
     let parsed: PackagesResponse =
-        serde_json::from_slice(&output.stdout).context("failed to parse foojay Disco API response")?;
+        serde_json::from_slice(&raw).context("failed to parse foojay Disco API response")?;
     Ok(parsed.result)
 }
 
