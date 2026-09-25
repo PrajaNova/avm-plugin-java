@@ -1,4 +1,4 @@
-use crate::versions::{find_package, strip_avm_prefix};
+use crate::versions::{find_package, package_sha256, strip_avm_prefix};
 use anyhow::{Context, Result};
 use avm_plugin_api::{run_timed, tool_dir};
 use std::fs;
@@ -33,6 +33,10 @@ pub fn install_java(version: &str) -> Result<()> {
         .arg(&archive);
     run_timed(curl, CURL_TIMEOUT_MS, "OpenJDK download", "AVM_JAVA_CURL_TIMEOUT")
         .with_context(|| format!("failed to download OpenJDK from {url}"))?;
+    if let Err(e) = verify_archive(&package, &archive) {
+        let _ = fs::remove_dir_all(&tmp);
+        return Err(e);
+    }
 
     // Temurin tarballs have exactly one root dir (e.g. `jdk-21.0.12+7`) — strip it.
     let mut tar = Command::new("tar");
@@ -50,4 +54,20 @@ pub fn install_java(version: &str) -> Result<()> {
     fs::rename(&source, &target).context("failed to move JDK into place")?;
     let _ = fs::remove_dir_all(&tmp);
     Ok(())
+}
+
+/// Check the JDK archive against the sha256 foojay reports for it. Fails
+/// closed unless `AVM_ALLOW_UNVERIFIED=1`.
+fn verify_archive(package: &crate::versions::Package, archive: &std::path::Path) -> Result<()> {
+    let expected = match package_sha256(package) {
+        Ok(hash) => hash,
+        Err(_) if std::env::var("AVM_ALLOW_UNVERIFIED").as_deref() == Ok("1") => {
+            eprintln!("warning: installing UNVERIFIED OpenJDK (no sha256 available; AVM_ALLOW_UNVERIFIED=1)");
+            return Ok(());
+        }
+        Err(e) => return Err(e.context("can't verify OpenJDK download; set AVM_ALLOW_UNVERIFIED=1 to skip")),
+    };
+    avm_plugin_api::verify_sha256(archive, &format!("{expected}  jdk.tar.gz"), "jdk.tar.gz")
+        .map(|_| ())
+        .context("refusing to install OpenJDK")
 }
