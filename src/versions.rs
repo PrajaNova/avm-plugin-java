@@ -60,6 +60,34 @@ pub struct Package {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PackageLinks {
     pub pkg_download_redirect: String,
+    pub pkg_info_uri: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PackageInfo {
+    checksum: String,
+    checksum_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PackageInfoResponse {
+    result: Vec<PackageInfo>,
+}
+
+/// The sha256 foojay reports for `package` (Adoptium's published checksum).
+pub fn package_sha256(package: &Package) -> Result<String> {
+    parse_sha256(&avm_plugin_api::fetch(&package.links.pkg_info_uri, 20)?)
+}
+
+fn parse_sha256(raw: &[u8]) -> Result<String> {
+    let parsed: PackageInfoResponse =
+        serde_json::from_slice(raw).context("failed to parse foojay package info")?;
+    parsed
+        .result
+        .into_iter()
+        .find(|info| info.checksum_type == "sha256" && !info.checksum.is_empty())
+        .map(|info| info.checksum)
+        .ok_or_else(|| anyhow!("foojay package info has no sha256 checksum"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,5 +121,18 @@ fn host_arch_param() -> Result<&'static str> {
         "aarch64" => Ok("aarch64"),
         "x86_64" => Ok("x64"),
         other => Err(anyhow!("unsupported OpenJDK architecture: {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_sha256_from_package_info() {
+        let ok = br#"{"result":[{"checksum":"ab12","checksum_type":"sha256","filename":"x"}]}"#;
+        assert_eq!(parse_sha256(ok).unwrap(), "ab12");
+        assert!(parse_sha256(br#"{"result":[{"checksum":"ab12","checksum_type":"md5"}]}"#).is_err());
+        assert!(parse_sha256(br#"{"result":[{"checksum":"","checksum_type":"sha256"}]}"#).is_err());
     }
 }
