@@ -1,18 +1,61 @@
-use avm_plugin_api::{runner, Manifest};
-use avm_plugin_java::JavaProvider;
+mod install;
+mod versions;
+
+use avm_plugin_api::{runner, tool_dir, Manifest, ToolProvider, ToolVersion, ToolVersionQuery};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
+struct JavaProvider;
+
+impl JavaProvider {
+    fn java_bin(&self, version: &str) -> anyhow::Result<Option<PathBuf>> {
+        let candidate = tool_dir("java")?.join(version).join("bin").join("java");
+        Ok(candidate.exists().then_some(candidate))
+    }
+}
+
+impl ToolProvider for JavaProvider {
+    fn name(&self) -> &str {
+        "java"
+    }
+
+    fn is_installed(&self, version: &str) -> bool {
+        self.java_bin(version).ok().flatten().is_some()
+    }
+
+    fn installed_versions(&self) -> anyhow::Result<Vec<String>> {
+        avm_plugin_api::list_installed("java", |v| self.is_installed(v))
+    }
+
+    fn available_versions(&self, query: ToolVersionQuery) -> anyhow::Result<Vec<ToolVersion>> {
+        versions::available_versions(query)
+    }
+
+    fn executable_path(&self, version: &str) -> anyhow::Result<Option<PathBuf>> {
+        self.java_bin(version)
+    }
+
+    fn env_vars(&self, version: &str) -> anyhow::Result<HashMap<String, String>> {
+        let home = tool_dir("java")?.join(version);
+        Ok(HashMap::from([("JAVA_HOME".to_string(), home.to_string_lossy().to_string())]))
+    }
+
+    fn install(&self, version: &str) -> anyhow::Result<()> {
+        install::install_java(version)
+    }
+
+    fn uninstall(&self, version: &str) -> anyhow::Result<()> {
+        avm_plugin_api::remove_version("java", version)
+    }
+}
+
 fn main() -> ExitCode {
-    let manifest = Manifest {
-        name: "java".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        api_version: Some(1),
-        description: Some(
-            "Built-in OpenJDK provider (Eclipse Temurin builds via the foojay Disco API)"
-                .to_string(),
-        ),
-        section_label: Some("OpenJDK".to_string()),
-        homepage: Some("https://github.com/prajanova/avm".to_string()),
-    };
-    runner::run(manifest, &JavaProvider::new())
+    let manifest = Manifest::new(
+        "java",
+        env!("CARGO_PKG_VERSION"),
+        "Built-in OpenJDK provider (Eclipse Temurin builds via the foojay Disco API)",
+        "OpenJDK",
+    );
+    runner::run(manifest, &JavaProvider)
 }

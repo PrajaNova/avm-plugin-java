@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use avm_plugin_api::{ToolVersion, ToolVersionQuery};
 use serde::Deserialize;
-use std::process::Command;
 
 /// The foojay Disco API (https://api.foojay.io) aggregates JDK builds across
 /// vendors in one place; `temurin` is Eclipse Adoptium's build of OpenJDK —
@@ -13,25 +12,12 @@ const DISCO_BASE_URL: &str = "https://api.foojay.io/disco/v3.0";
 const DISTRIBUTION: &str = "temurin";
 
 pub fn available_versions(query: ToolVersionQuery) -> Result<Vec<ToolVersion>> {
-    let releases = package_index()?;
-
-    let filtered: Vec<&Package> = match query {
-        // No cap: the interactive picker (avm-cli) has real scrolling and
-        // type-to-search, so there's no need to pre-trim the list — let
-        // the user search/scroll the actual full release history.
-        ToolVersionQuery::Recent => releases.iter().collect(),
-        ToolVersionQuery::Latest => releases.iter().take(1).collect(),
-        ToolVersionQuery::Major(major) => releases
-            .iter()
-            .filter(|pkg| pkg.major_version == major)
-            .collect(),
-    };
-
-    Ok(filtered
+    let releases = query.filter(package_index()?, |pkg| pkg.major_version);
+    Ok(releases
         .into_iter()
         .map(|pkg| ToolVersion {
             version: avm_version(&pkg.java_version),
-            label: pkg.java_version.clone(),
+            label: pkg.java_version,
             channel: Some(pkg.term_of_support.clone()),
             is_lts: pkg.term_of_support == "lts",
             is_security: false,
@@ -42,7 +28,7 @@ pub fn available_versions(query: ToolVersionQuery) -> Result<Vec<ToolVersion>> {
 /// avm's on-disk version string. Prefixed so `~/.avm/tools/java/<version>`
 /// stays self-describing and matches the naming an existing asdf-java
 /// install already used (`openjdk-17.0.2`) — no forced reinstall on cutover.
-pub fn avm_version(java_version: &str) -> String {
+fn avm_version(java_version: &str) -> String {
     format!("openjdk-{java_version}")
 }
 
@@ -63,17 +49,45 @@ pub fn find_package(java_version: &str) -> Result<Package> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Package {
-    pub java_version: String,
-    pub distribution_version: String,
-    pub major_version: u64,
+    java_version: String,
+    distribution_version: String,
+    major_version: u64,
     #[serde(default)]
-    pub term_of_support: String,
+    term_of_support: String,
     pub links: PackageLinks,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PackageLinks {
     pub pkg_download_redirect: String,
+    pub pkg_info_uri: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PackageInfo {
+    checksum: String,
+    checksum_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PackageInfoResponse {
+    result: Vec<PackageInfo>,
+}
+
+/// The sha256 foojay reports for `package` (Adoptium's published checksum).
+pub fn package_sha256(package: &Package) -> Result<String> {
+    parse_sha256(&avm_plugin_api::fetch(&package.links.pkg_info_uri, 20)?)
+}
+
+fn parse_sha256(raw: &[u8]) -> Result<String> {
+    let parsed: PackageInfoResponse =
+        serde_json::from_slice(raw).context("failed to parse foojay package info")?;
+    parsed
+        .result
+        .into_iter()
+        .find(|info| info.checksum_type == "sha256" && !info.checksum.is_empty())
+        .map(|info| info.checksum)
+        .ok_or_else(|| anyhow!("foojay package info has no sha256 checksum"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,25 +102,9 @@ fn package_index() -> Result<Vec<Package>> {
         host_arch_param()?,
     );
 
-    let output = Command::new("curl")
-        .arg("-fsSL")
-        .arg("--connect-timeout")
-        .arg("10")
-        .arg("--max-time")
-        .arg("20")
-        .arg(&url)
-        .output()
-        .with_context(|| format!("failed to fetch OpenJDK version index from {url}"))?;
-
-    if !output.status.success() {
-        return Err(anyhow!(
-            "failed to fetch OpenJDK version index from {url}: curl exited with {}",
-            output.status
-        ));
-    }
-
+    let raw = avm_plugin_api::fetch(&url, 20)?;
     let parsed: PackagesResponse =
-        serde_json::from_slice(&output.stdout).context("failed to parse foojay Disco API response")?;
+        serde_json::from_slice(&raw).context("failed to parse foojay Disco API response")?;
     Ok(parsed.result)
 }
 
@@ -123,5 +121,18 @@ fn host_arch_param() -> Result<&'static str> {
         "aarch64" => Ok("aarch64"),
         "x86_64" => Ok("x64"),
         other => Err(anyhow!("unsupported OpenJDK architecture: {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_sha256_from_package_info() {
+        let ok = br#"{"result":[{"checksum":"ab12","checksum_type":"sha256","filename":"x"}]}"#;
+        assert_eq!(parse_sha256(ok).unwrap(), "ab12");
+        assert!(parse_sha256(br#"{"result":[{"checksum":"ab12","checksum_type":"md5"}]}"#).is_err());
+        assert!(parse_sha256(br#"{"result":[{"checksum":"","checksum_type":"sha256"}]}"#).is_err());
     }
 }
