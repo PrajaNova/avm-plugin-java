@@ -97,9 +97,10 @@ struct PackagesResponse {
 
 fn package_index() -> Result<Vec<Package>> {
     let url = format!(
-        "{DISCO_BASE_URL}/packages?distribution={DISTRIBUTION}&operating_system={}&architecture={}&archive_type=tar.gz&package_type=jdk&release_status=ga",
+        "{DISCO_BASE_URL}/packages?distribution={DISTRIBUTION}&operating_system={}&architecture={}&archive_type=tar.gz&package_type=jdk&release_status=ga{}",
         host_os_param()?,
         host_arch_param()?,
+        libc_param(),
     );
 
     let raw = avm_plugin_api::fetch(&url, 20)?;
@@ -113,6 +114,16 @@ fn host_os_param() -> Result<&'static str> {
         "macos" => Ok("macos"),
         "linux" => Ok("linux"),
         other => Err(anyhow!("unsupported OpenJDK platform: {other}")),
+    }
+}
+
+/// Linux results include Alpine (musl) builds, listed first for some
+/// versions; they can't run on a glibc distro, so ask for glibc only.
+fn libc_param() -> &'static str {
+    if std::env::consts::OS == "linux" {
+        "&lib_c_type=glibc"
+    } else {
+        ""
     }
 }
 
