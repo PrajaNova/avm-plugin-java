@@ -10,7 +10,7 @@ const TAR_TIMEOUT_MS: u64 = 120_000;
 pub fn install_java(version: &str) -> Result<()> {
     let tools_root = tool_dir("java")?;
     let target = tools_root.join(version);
-    if target.join("bin").join("java").exists() {
+    if target.join("bin").join(crate::JAVA_BIN).exists() {
         return Ok(());
     }
 
@@ -25,7 +25,7 @@ pub fn install_java(version: &str) -> Result<()> {
     }
     fs::create_dir_all(&jdk).context("failed to create java install temp dir")?;
 
-    let archive = tmp.join("jdk.tar.gz");
+    let archive = tmp.join(format!("jdk.{}", crate::versions::ARCHIVE_TYPE));
     let url = &package.links.pkg_download_redirect;
     let max_secs = avm_plugin_api::env_timeout_ms("AVM_JAVA_CURL_TIMEOUT", CURL_TIMEOUT_MS) / 1000;
     let mut curl = Command::new("curl");
@@ -40,7 +40,8 @@ pub fn install_java(version: &str) -> Result<()> {
 
     // Temurin tarballs have exactly one root dir (e.g. `jdk-21.0.12+7`) — strip it.
     let mut tar = Command::new("tar");
-    tar.arg("-xzf").arg(&archive).arg("--strip-components=1").arg("-C").arg(&jdk);
+    // Windows 10+ ships bsdtar, which also reads zip (and --strip-components).
+    tar.arg(if cfg!(windows) { "-xf" } else { "-xzf" }).arg(&archive).arg("--strip-components=1").arg("-C").arg(&jdk);
     run_timed(tar, TAR_TIMEOUT_MS, "OpenJDK archive extraction", "AVM_JAVA_TAR_TIMEOUT")?;
 
     // Temurin's macOS archives are `<root>/Contents/Home/{bin,lib,...}` (an app
@@ -67,7 +68,8 @@ fn verify_archive(package: &crate::versions::Package, archive: &std::path::Path)
         }
         Err(e) => return Err(e.context("can't verify OpenJDK download; set AVM_ALLOW_UNVERIFIED=1 to skip")),
     };
-    avm_plugin_api::verify_sha256(archive, &format!("{expected}  jdk.tar.gz"), "jdk.tar.gz")
+    let name = format!("jdk.{}", crate::versions::ARCHIVE_TYPE);
+    avm_plugin_api::verify_sha256(archive, &format!("{expected}  {name}"), &name)
         .map(|_| ())
         .context("refusing to install OpenJDK")
 }

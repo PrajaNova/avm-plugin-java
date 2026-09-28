@@ -1,5 +1,9 @@
 mod install;
+
 mod versions;
+
+/// `bin/java` (or `bin\java.exe`) inside each installed JDK.
+pub(crate) const JAVA_BIN: &str = if cfg!(windows) { "java.exe" } else { "java" };
 
 use avm_plugin_api::{runner, tool_dir, Manifest, ToolProvider, ToolVersion, ToolVersionQuery};
 use std::collections::HashMap;
@@ -10,7 +14,7 @@ struct JavaProvider;
 
 impl JavaProvider {
     fn java_bin(&self, version: &str) -> anyhow::Result<Option<PathBuf>> {
-        let candidate = tool_dir("java")?.join(version).join("bin").join("java");
+        let candidate = tool_dir("java")?.join(version).join("bin").join(JAVA_BIN);
         Ok(candidate.exists().then_some(candidate))
     }
 }
