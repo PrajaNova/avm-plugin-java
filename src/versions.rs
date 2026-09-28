@@ -97,9 +97,10 @@ struct PackagesResponse {
 
 fn package_index() -> Result<Vec<Package>> {
     let url = format!(
-        "{DISCO_BASE_URL}/packages?distribution={DISTRIBUTION}&operating_system={}&architecture={}&archive_type=tar.gz&package_type=jdk&release_status=ga{}",
+        "{DISCO_BASE_URL}/packages?distribution={DISTRIBUTION}&operating_system={}&architecture={}&archive_type={}&package_type=jdk&release_status=ga{}",
         host_os_param()?,
         host_arch_param()?,
+        ARCHIVE_TYPE,
         libc_param(),
     );
 
@@ -109,10 +110,14 @@ fn package_index() -> Result<Vec<Package>> {
     Ok(parsed.result)
 }
 
+/// Temurin ships zips for Windows, tarballs elsewhere.
+pub const ARCHIVE_TYPE: &str = if cfg!(windows) { "zip" } else { "tar.gz" };
+
 fn host_os_param() -> Result<&'static str> {
     match std::env::consts::OS {
         "macos" => Ok("macos"),
         "linux" => Ok("linux"),
+        "windows" => Ok("windows"),
         other => Err(anyhow!("unsupported OpenJDK platform: {other}")),
     }
 }
