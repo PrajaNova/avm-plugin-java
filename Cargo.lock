@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "avm-plugin-java"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "avm-plugin-api",
